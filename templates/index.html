@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vehicle Count and Speed Detection</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Vehicle Count and Speed Detection</h1>
+        <div>
+            <button id="start-btn" class="btn">Start Camera</button>
+            <button id="stop-btn" class="btn">Stop Camera</button>
+        </div>
+        <div>
+            <!-- Horizontal line removed -->
+        </div>
+        <form id="upload-form" action="/process_video" method="post" enctype="multipart/form-data">
+            <label for="file-input" class="btn">Choose File</label>
+            <input type="file" name="video" id="file-input" style="display: none;">
+            <input type="submit" value="Upload" id="upload-btn" style="display: none;">
+        </form>
+        <div>
+            <img id="video-stream" src="" style="display: none;">
+        </div>
+    </div>
+    <script>
+        $(document).ready(function() {
+            $('#start-btn').click(function() {
+                $.post('/start_camera', function(response) {
+                    console.log(response);
+                    $('#video-stream').show().attr('src', '/video_feed');
+                });
+            });
+
+            $('#file-input').change(function() {
+                $('#upload-form').submit();
+            });
+
+            $('#stop-btn').click(function() {
+                $.post('/stop_camera', function(response) {
+                    console.log(response);
+                    $('#video-stream').hide().attr('src', '');
+                });
+            });
+        });
+    </script>
+</body>
+</html>
