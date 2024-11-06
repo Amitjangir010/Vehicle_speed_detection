@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Traffic Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="video-container">
+            <h2>Live Traffic Monitor</h2>
+            <div id="camera-feed">
+                <img id="video" src="{{ url_for('video_feed') }}" style="display: none; width: 640px; height: 480px;">
+                <div id="camera-status" class="status-message"></div>
+            </div>
+            
+            <div class="controls">
+                <button id="startBtn" class="btn btn-primary">Start Camera</button>
+                <button id="stopBtn" class="btn btn-danger">Stop All</button>
+                <div class="upload-container">
+                    <input type="file" id="videoUpload" accept="video/*" style="display: none;">
+                    <button id="uploadBtn" class="btn btn-success">Upload Video</button>
+                </div>
+                <button id="pauseBtn" class="btn btn-warning">Pause</button>
+            </div>
+        </div>
+        
+        <div class="stats-container">
+            <div class="stat-box">
+                <h3>Vehicle Count</h3>
+                <div id="currentCount">0</div>
+            </div>
+            
+            <div class="stat-box">
+                <h3>Average Speed</h3>
+                <div id="avgSpeed">0 km/h</div>
+            </div>
+            
+            <div class="stat-box">
+                <h3>Speed Over Time</h3>
+                <div id="speedGraph"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isActive = false;
+        let isPaused = false;
+        let speedHistory = [];
+        let rollingAverage = [];
+        const ROLLING_WINDOW = 10;
+
+        $('#startBtn').click(function() {
+            $('#camera-status').text('Starting camera...');
+            
+            $.get('/start_camera')
+                .done(function(response) {
+                    if (response.status === 'started') {
+                        isActive = true;
+                        $('#video')
+                            .attr('src', '/video_feed')
+                            .show();
+                        $('#camera-status').text('Camera active');
+                        startUpdatingStats();
+                    } else {
+                        $('#camera-status').text(response.message);
+                    }
+                });
+        });
+        
+        $('#stopBtn').click(function() {
+            $.get('/stop_camera')
+                .done(function(response) {
+                    isActive = false;
+                    isPaused = false;
+                    $('#video').hide();
+                    $('#camera-status').text('Stopped');
+                    $('#pauseBtn').text('Pause');
+                });
+        });
+        
+        $('#pauseBtn').click(function() {
+            if (isActive) {
+                isPaused = !isPaused;
+                $.get('/pause_video?paused=' + isPaused);
+                $(this).text(isPaused ? 'Resume' : 'Pause');
+            }
+        });
+        
+        $('#uploadBtn').click(function() {
+            $('#videoUpload').click();
+        });
+        
+        $('#videoUpload').change(function() {
+            const file = this.files[0];
+            if (file) {
+                const formData = new FormData();
+                formData.append('video', file);
+                
+                $('#camera-status').text('Uploading video...');
+                
+                $.ajax({
+                    url: '/upload_video',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            isActive = true;
+                            $('#video')
+                                .attr('src', '/video_feed')
+                                .show();
+                            $('#camera-status').text('Video processing');
+                            startUpdatingStats();
+                        } else {
+                            $('#camera-status').text(response.message);
+                        }
+                    }
+                });
+            }
+        });
+
+        function calculateRollingAverage(data) {
+            if (data.length < ROLLING_WINDOW) return data;
+            
+            let result = [];
+            for (let i = ROLLING_WINDOW - 1; i < data.length; i++) {
+                let sum = 0;
+                for (let j = 0; j < ROLLING_WINDOW; j++) {
+                    sum += data[i - j];
+                }
+                result.push(sum / ROLLING_WINDOW);
+            }
+            return result;
+        }
+
+        function updateStats() {
+            if (!isActive || isPaused) return;
+            
+            $.get('/get_stats')
+                .done(function(data) {
+                    $('#currentCount').text(data.current_count);
+                    $('#avgSpeed').text(data.average_speed.toFixed(1) + ' km/h');
+                    
+                    // Update speed history
+                    speedHistory.push(data.average_speed);
+                    if (speedHistory.length > 50) speedHistory.shift();
+                    
+                    // Calculate rolling average
+                    rollingAverage = calculateRollingAverage(speedHistory);
+                    
+                    // Create x-axis timestamps
+                    let timestamps = [];
+                    for (let i = 0; i < speedHistory.length; i++) {
+                        timestamps.push(new Date(Date.now() - (speedHistory.length - i) * 1000).toLocaleTimeString());
+                    }
+                    
+                    // Update speed graph with both raw and smoothed data
+                    const rawTrace = {
+                        x: timestamps,
+                        y: speedHistory,
+                        type: 'scatter',
+                        name: 'Raw Speed',
+                        line: { color: '#ddd', width: 1 }
+                    };
+                    
+                    const avgTrace = {
+                        x: timestamps.slice(ROLLING_WINDOW - 1),
+                        y: rollingAverage,
+                        type: 'scatter',
+                        name: 'Average Speed',
+                        line: { color: '#007bff', width: 2 }
+                    };
+                    
+                    const layout = {
+                        title: 'Speed Over Time',
+                        height: 300,
+                        yaxis: {
+                            title: 'Speed (km/h)',
+                            range: [0, Math.max(...speedHistory) * 1.1]
+                        },
+                        xaxis: {
+                            title: 'Time',
+                            showgrid: false
+                        },
+                        showlegend: true,
+                        legend: {
+                            x: 0,
+                            y: 1
+                        }
+                    };
+                    
+                    Plotly.newPlot('speedGraph', [rawTrace, avgTrace], layout);
+                });
+        }
+        
+        function startUpdatingStats() {
+            setInterval(updateStats, 1000);
+        }
+    </script>
+</body>
+</html> 
